@@ -48,3 +48,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Setup guide files (optional - remove if you want to keep them)
+*SETUP_GUIDE.md
+*DEPLOYMENT_GUIDE.md
+*PAYMENT_TESTING_GUIDE.md
+*IMPLEMENTATION_ROADMAP.md
+*PHASE_1_DISCOVERY_COMPLETE.md
+*VERCEL_DEPLOYMENT_GUIDE.md
+*WEBHOOK_SETUP_GUIDE.md
+*FIREBASE_SETUP_GUIDE.md
+
