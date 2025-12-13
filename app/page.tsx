@@ -3,10 +3,14 @@ import { whopsdk } from "@/lib/whop-sdk";
 import Link from "next/link";
 import { Button } from "@whop/react/components";
 
+// Force dynamic rendering to avoid static generation issues
+export const dynamic = 'force-dynamic';
+
 export default async function HomePage() {
 	try {
 		// Try to get user info without requiring a specific experience/company
-		const { userId } = await whopsdk.verifyUserToken(await headers());
+		const headersList = await headers();
+		const { userId } = await whopsdk.verifyUserToken(headersList);
 		
 		if (userId) {
 			const user = await whopsdk.users.retrieve(userId);

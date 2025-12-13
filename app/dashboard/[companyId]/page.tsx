@@ -2,6 +2,9 @@ import { headers } from "next/headers";
 import { whopsdk } from "@/lib/whop-sdk";
 import TipJarDashboard from "@/components/TipJarDashboard";
 
+// Force dynamic rendering to avoid static generation issues
+export const dynamic = 'force-dynamic';
+
 export default async function DashboardPage({
 	params,
 }: {
@@ -9,7 +12,8 @@ export default async function DashboardPage({
 }) {
 	const { companyId } = await params;
 	// Ensure that user is logged in on whop.
-	const { userId } = await whopsdk.verifyUserToken(await headers());
+	const headersList = await headers();
+	const { userId } = await whopsdk.verifyUserToken(headersList);
 
 	// Fetch necessary data we want from whop.
 	const [company, user, access] = await Promise.all([

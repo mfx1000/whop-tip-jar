@@ -4,6 +4,9 @@ import Link from "next/link";
 import { whopsdk } from "@/lib/whop-sdk";
 import TipJarExperience from "@/components/TipJarExperience";
 
+// Force dynamic rendering to avoid static generation issues
+export const dynamic = 'force-dynamic';
+
 export default async function ExperiencePage({
 	params,
 }: {
@@ -12,7 +15,8 @@ export default async function ExperiencePage({
 	const { experienceId } = await params;
 	
 	// Ensure that user is logged in on whop.
-	const { userId } = await whopsdk.verifyUserToken(await headers());
+	const headersList = await headers();
+	const { userId } = await whopsdk.verifyUserToken(headersList);
 
 	// Fetch the necessary data we want from whop.
 	const [experience, user, access] = await Promise.all([
