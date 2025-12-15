@@ -78,47 +78,33 @@ export async function POST(request: NextRequest) {
       productIds = existingDoc.data()?.productIds || {};
     }
 
-    // Create/update products for each tip amount using correct Whop flow
+    // Create/update products for each tip amount with correct API structure
     for (const amount of tipAmounts) {
       const amountKey = amount.toString();
       
       // Only create new product if it doesn't exist
       if (!productIds[amountKey]) {
         try {
-          console.log(`Creating tip product for $${amount} with companyId: ${companyId}`);
-          
-          // Create access pass product first
+          // Create product with correct API structure
           const product = await whopsdk.products.create({
             company_id: companyId,
             title: `$${amount} Tip`,
             description: `Support creator with a $${amount} tip`,
+            visibility: 'hidden',
           });
           
-          console.log(`Access pass product created:`, product);
-          
-          // Create checkout configuration for the product
-          const checkoutConfig = await whopsdk.checkoutConfigurations.create({
-            plan: {
-              company_id: companyId,
-              product_id: product.id,
-              initial_price: amount, // Use dollars directly
-              currency: 'usd',
-              plan_type: 'one_time',
-            },
+          // Create plan for the product
+          const plan = await whopsdk.plans.create({
+            company_id: companyId,
+            product_id: product.id,
+            plan_type: 'one_time',
+            initial_price: amount * 100, // Whop uses cents
+            currency: 'usd',
           });
           
-          console.log(`Checkout configuration created:`, checkoutConfig);
-          productIds[amountKey] = checkoutConfig.plan.id;
-          
-        } catch (error) {
-          console.error(`Error creating tip product for $${amount}:`, error);
-          
-          // For debugging - log the full error details
-          if (error instanceof Error) {
-            console.error(`Error message: ${error.message}`);
-            console.error(`Error stack: ${error.stack}`);
-          }
-          
+          productIds[amountKey] = plan.id;
+        } catch (productError) {
+          console.error(`Error creating product for $${amount}:`, productError);
           // Continue with other amounts if one fails
         }
       }

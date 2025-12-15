@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Button } from "@whop/react/components";
-import { useIframeSdk } from "@whop/react/iframe";
+import { useIframeSdk } from "@whop/react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { Heart, Sparkles, DollarSign, Settings, ExternalLink } from 'lucide-react';
 
@@ -34,7 +34,7 @@ export default function TipJarExperience({
 	const [customAmount, setCustomAmount] = useState<string>('');
 	const [isLoading, setIsLoading] = useState(true);
 	const [isProcessing, setIsProcessing] = useState(false);
-	const sdk = useIframeSdk();
+	const iframeSdk = useIframeSdk();
 
 	// Check if current user is the owner of the experience/company
 	const isOwner = user?.id === fullCompany?.owner_user?.id || user?.id === experience?.ownerId;
@@ -83,46 +83,49 @@ export default function TipJarExperience({
 		setIsProcessing(true);
 
 		try {
-			// Get or create tip config
-			let config = tipConfig;
-			if (!config || !config.productIds[amount.toString()]) {
-				const response = await fetch('/api/tip-config', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({
-						companyId: experience.company?.id,
+			// Create checkout configuration for in-app purchase
+			const response = await fetch('/api/checkout-config', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					companyId: experience.company?.id,
+					amount: amount,
+					metadata: {
 						experienceId: experience.id,
-						tipAmounts: config?.tipAmounts || [10, 20, 50],
-						welcomeMessage: config?.welcomeMessage || 'Thank you for your support! 🙏',
-					}),
-				});
-				const newConfig = await response.json();
-				config = newConfig.data;
+						tipperId: user?.id,
+						experienceName: experience.title || 'Tip Jar',
+						tipperName: displayName,
+					},
+				}),
+			});
+
+			const checkoutData = await response.json();
+			
+			if (!checkoutData.success) {
+				throw new Error(checkoutData.error || 'Failed to create checkout configuration');
 			}
 
-			const productId = config?.productIds[amount.toString()];
-			if (!productId) {
-				throw new Error('Product not found for this amount');
-			}
+			const checkoutConfig = checkoutData.data;
 
-			// Use Whop in-app purchase modal
-			if (sdk) {
-				const result = await sdk.inAppPurchase({
-					planId: productId,
-				});
-				
-				if (result.status === 'ok') {
-					console.log('Payment successful:', result.data);
-				} else {
-					console.error('Payment failed:', result.error);
-				}
+			// Use iframe SDK to trigger in-app purchase
+			const result = await iframeSdk.inAppPurchase({
+				planId: checkoutConfig.plan.id,
+				id: checkoutConfig.id,
+			});
+
+			if (result.status === 'ok') {
+				console.log('Payment successful:', result.data);
+				// You can optionally show a success message or refresh tip history
+				// The webhook will handle the payment processing
 			} else {
-				// Fallback to redirect if SDK not available
-				window.location.href = `https://whop.com/checkout/${productId}`;
+				console.error('Payment failed:', result);
+				// Handle payment error
 			}
 
 		} catch (error) {
 			console.error('Error processing tip:', error);
+			// Show error message to user
+		} finally {
 			setIsProcessing(false);
 		}
 	};
