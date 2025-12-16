@@ -77,9 +77,45 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 		const paymentId = payment.id;
 		// Use any type to access properties not in the Payment type definition
 		const paymentData = payment as any;
-		const grossAmount = paymentData.amount ? paymentData.amount / 100 : 0; // Convert from cents to dollars
-		const amountAfterFees = paymentData.amount_after_fees ? paymentData.amount_after_fees / 100 : grossAmount; // Convert from cents to dollars
-		const feeAmount = paymentData.fee_amount ? paymentData.fee_amount / 100 : (grossAmount - amountAfterFees); // Convert from cents to dollars
+		
+		// Handle different payment structures - some webhooks have amounts in cents, others in dollars
+		let grossAmount = 0;
+		let amountAfterFees = 0;
+		let feeAmount = 0;
+		
+		if (paymentData.amount) {
+			// Check if amount is in cents (large number) or dollars (small number)
+			if (paymentData.amount > 100) {
+				// Likely cents (e.g., 10000 for $100)
+				grossAmount = paymentData.amount / 100;
+			} else {
+				// Likely dollars (e.g., 1.00 for $1)
+				grossAmount = paymentData.amount;
+			}
+		}
+		
+		// Handle amount_after_fees
+		if (paymentData.amount_after_fees !== undefined) {
+			if (paymentData.amount_after_fees > 100) {
+				amountAfterFees = paymentData.amount_after_fees / 100;
+			} else {
+				amountAfterFees = paymentData.amount_after_fees;
+			}
+		} else {
+			amountAfterFees = grossAmount;
+		}
+		
+		// Handle fee_amount or calculate from difference
+		if (paymentData.fee_amount !== undefined) {
+			if (paymentData.fee_amount > 100) {
+				feeAmount = paymentData.fee_amount / 100;
+			} else {
+				feeAmount = paymentData.fee_amount;
+			}
+		} else {
+			feeAmount = grossAmount - amountAfterFees;
+		}
+		
 		const companyId = paymentData.company?.id;
 		const userId = paymentData.user?.id;
 		const username = paymentData.user?.username || 'Anonymous';
@@ -91,15 +127,15 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 		}
 
 		// Calculate accurate payout splits (80% to company, 20% to developer)
-		const companyAmount = amountAfterFees * 0.8;
-		const developerAmount = amountAfterFees * 0.2;
+		let finalCompanyAmount = amountAfterFees * 0.8;
+		let finalDeveloperAmount = amountAfterFees * 0.2;
 
 		console.log('Payment breakdown:', {
 			grossAmount,
 			feeAmount,
 			amountAfterFees,
-			companyAmount,
-			developerAmount
+			companyAmount: finalCompanyAmount,
+			developerAmount: finalDeveloperAmount
 		});
 
 		// Developer user ID (replace with your actual developer user ID)
@@ -107,6 +143,26 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 
 		// Use environment variable for base URL
 		const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://whop-tip-jar.vercel.app';
+			
+		// Add tip amount from metadata if available (for $1 tips)
+		if (metadata.tip_amount) {
+			const tipAmountFromMetadata = parseFloat(metadata.tip_amount);
+			if (!isNaN(tipAmountFromMetadata)) {
+				grossAmount = tipAmountFromMetadata;
+				// Recalculate amounts if tip_amount is provided
+				amountAfterFees = grossAmount - feeAmount;
+				finalCompanyAmount = amountAfterFees * 0.8;
+				finalDeveloperAmount = amountAfterFees * 0.2;
+				
+				console.log('Updated payment breakdown from tip_amount metadata:', {
+					grossAmount,
+					feeAmount,
+					amountAfterFees,
+					companyAmount: finalCompanyAmount,
+					developerAmount: finalDeveloperAmount
+				});
+			}
+		}
 			
 		// Build transaction data, filtering out undefined values
 		const transactionData: any = {
@@ -118,8 +174,8 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 			paymentId,
 			status: 'completed',
 			// Accurate payout amounts
-			companyAmount,
-			developerAmount,
+			companyAmount: finalCompanyAmount,
+			developerAmount: finalDeveloperAmount,
 			feeAmount,
 		};
 
@@ -145,10 +201,10 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 
 		// Execute payout transfers using Whop API
 		try {
-			// Transfer 80% to the company
-			if (companyAmount >= 0.01) { // Only transfer if amount is meaningful
+			// Transfer 80% to company
+			if (finalCompanyAmount >= 0.01) { // Only transfer if amount is meaningful
 				const companyTransfer = await whopsdk.transfers.create({
-					amount: companyAmount,
+					amount: finalCompanyAmount,
 					currency: 'usd',
 					destination_id: companyId, // Transfer to company
 					origin_id: companyId, // From company's balance
@@ -159,9 +215,9 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 			}
 
 			// Transfer 20% to developer
-			if (developerAmount >= 0.01) { // Only transfer if amount is meaningful
+			if (finalDeveloperAmount >= 0.01) { // Only transfer if amount is meaningful
 				const developerTransfer = await whopsdk.transfers.create({
-					amount: developerAmount,
+					amount: finalDeveloperAmount,
 					currency: 'usd',
 					destination_id: developerUserId, // Transfer to developer user
 					origin_id: companyId, // From company's balance
@@ -173,7 +229,7 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 
 		} catch (transferError) {
 			console.error('Error creating transfers:', transferError);
-			// Don't fail the webhook, but log the error for manual intervention
+			// Don't fail webhook, but log the error for manual intervention
 		}
 
 		// Update analytics with accurate data
@@ -186,8 +242,8 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 				companyId,
 				tipAmount: grossAmount,
 				netAmount: amountAfterFees,
-				companyAmount,
-				developerAmount,
+				companyAmount: finalCompanyAmount,
+				developerAmount: finalDeveloperAmount,
 				feeAmount,
 			}),
 		});
@@ -201,8 +257,8 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 			paymentId, 
 			grossAmount, 
 			amountAfterFees, 
-			companyAmount, 
-			developerAmount,
+			companyAmount: finalCompanyAmount, 
+			developerAmount: finalDeveloperAmount,
 			companyId 
 		});
 
