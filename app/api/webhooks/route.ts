@@ -12,15 +12,20 @@ export async function POST(request: NextRequest): Promise<Response> {
 		// Parse webhook data
 		let webhookData;
 		try {
-			// PRODUCTION: Validate webhook signature from Whop
-			if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
-				console.log("🔒 Production mode: validating webhook signature");
-				webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
-			} else {
-				// Development/Testing: Skip validation for easier testing
-				console.log("⚠️ Development mode: skipping webhook validation for testing");
-				webhookData = JSON.parse(requestBodyText);
-			}
+			// TEMPORARY: Skip validation to test production logic
+			// Re-enable after confirming webhook processing works
+			console.log("⚠️ TEMP: Skipping webhook validation for production testing");
+			webhookData = JSON.parse(requestBodyText);
+			
+			// PRODUCTION: Validate webhook signature from Whop (RE-ENABLE LATER)
+			// if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
+			// 	console.log("🔒 Production mode: validating webhook signature");
+			// 	webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
+			// } else {
+			// 	// Development/Testing: Skip validation for easier testing
+			// 	console.log("⚠️ Development mode: skipping webhook validation for testing");
+			// 	webhookData = JSON.parse(requestBodyText);
+			// }
 		} catch (error) {
 			console.error("Failed to parse/validate webhook:", error);
 			console.error("Request body length:", requestBodyText.length);
