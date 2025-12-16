@@ -180,7 +180,14 @@ export default function TipJarDashboard({
 
 	// Helper function to safely get company amount with backward compatibility
 	const getCompanyAmount = (transaction: TipTransaction) => {
-		return transaction.companyAmount || transaction.creatorAmount || 0;
+		const amount = transaction.companyAmount || transaction.creatorAmount || 0;
+		return typeof amount === 'number' ? amount : 0;
+	};
+
+	// Helper function to safely format numbers
+	const safeToFixed = (value: any, decimals: number = 2) => {
+		const num = typeof value === 'number' ? value : parseFloat(value);
+		return isNaN(num) ? '0.00' : num.toFixed(decimals);
 	};
 
 	const addTipAmount = () => {
@@ -239,7 +246,7 @@ export default function TipJarDashboard({
 							<span className="text-sm text-[#888888]">Your Earnings</span>
 						</div>
 						<div className="text-2xl font-bold text-[#ffffff]">
-							${analytics?.totalCreatorEarnings.toFixed(2) || '0.00'}
+							${safeToFixed(analytics?.totalCreatorEarnings)}
 						</div>
 					</div>
 
@@ -259,7 +266,7 @@ export default function TipJarDashboard({
 							<span className="text-sm text-[#888888]">Average Tip</span>
 						</div>
 						<div className="text-2xl font-bold text-[#ffffff]">
-							${analytics?.averageTipAmount.toFixed(2) || '0.00'}
+							${safeToFixed(analytics?.averageTipAmount)}
 						</div>
 					</div>
 				</motion.div>
@@ -402,8 +409,8 @@ export default function TipJarDashboard({
 									['Username', 'Amount', 'You Receive', 'Status', 'Date'],
 									...transactions.map(t => [
 										t.fromUsername,
-										t.amount.toFixed(2),
-										getCompanyAmount(t).toFixed(2),
+										safeToFixed(t.amount),
+										safeToFixed(getCompanyAmount(t)),
 										t.status,
 										new Date(t.createdAt).toLocaleString()
 									])
@@ -445,9 +452,9 @@ export default function TipJarDashboard({
 									{transactions.map((transaction) => (
 										<tr key={transaction.id} className="border-b border-[#1a1a1a] hover:bg-[#2a2a2a]/50 transition-colors duration-150">
 											<td className="py-3 px-4 text-sm text-[#ffffff]">{transaction.fromUsername}</td>
-											<td className="py-3 px-4 text-sm font-medium text-[#ffffff]">${transaction.amount.toFixed(2)}</td>
+											<td className="py-3 px-4 text-sm font-medium text-[#ffffff]">${safeToFixed(transaction.amount)}</td>
 											<td className="py-3 px-4 text-sm text-green-400 font-medium">
-												${getCompanyAmount(transaction).toFixed(2)}
+												${safeToFixed(getCompanyAmount(transaction))}
 											</td>
 											<td className="py-3 px-4">
 												<span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
