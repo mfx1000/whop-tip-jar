@@ -34,6 +34,8 @@ export default function TipJarExperience({
 	const [customAmount, setCustomAmount] = useState<string>('');
 	const [isLoading, setIsLoading] = useState(true);
 	const [isProcessing, setIsProcessing] = useState(false);
+	const [showSuccess, setShowSuccess] = useState(false);
+	const [lastPaymentAmount, setLastPaymentAmount] = useState<number | null>(null);
 	const iframeSdk = useIframeSdk();
 
 	// Check if current user is the owner of the experience/company
@@ -115,8 +117,12 @@ export default function TipJarExperience({
 
 			if (result.status === 'ok') {
 				console.log('Payment successful:', result.data);
-				// You can optionally show a success message or refresh tip history
-				// The webhook will handle the payment processing
+				// Show success message and record payment amount
+				setShowSuccess(true);
+				setLastPaymentAmount(amount);
+				setTimeout(() => {
+					setShowSuccess(false);
+				}, 5000); // Hide after 5 seconds
 			} else {
 				console.error('Payment failed:', result);
 				// Handle payment error
@@ -144,6 +150,66 @@ export default function TipJarExperience({
 
 	return (
 		<div className="min-h-screen bg-[#0a0a0a] text-[#ffffff] p-2">
+			{/* Success Message Overlay */}
+			<AnimatePresence>
+				{showSuccess && (
+					<motion.div
+						initial={{ opacity: 0 }}
+						animate={{ opacity: 1 }}
+						exit={{ opacity: 0 }}
+						transition={{ duration: 0.3 }}
+						className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+					>
+						<motion.div
+							initial={{ scale: 0.8, opacity: 0 }}
+							animate={{ scale: 1, opacity: 1 }}
+							exit={{ scale: 0.8, opacity: 0 }}
+							transition={{ type: "spring", stiffness: 300, damping: 30 }}
+							className="bg-gradient-to-br from-green-500 to-emerald-600 p-8 rounded-2xl shadow-2xl max-w-sm mx-4"
+						>
+							<div className="text-center">
+								<motion.div
+									initial={{ scale: 0 }}
+									animate={{ scale: [0, 1] }}
+									transition={{ type: "spring", stiffness: 400, damping: 25 }}
+								>
+									<div className="text-6xl mb-4">🎉</div>
+								</motion.div>
+								<h3 className="text-2xl font-bold text-white mb-2">
+									Tip Successful!
+								</h3>
+								<p className="text-lg text-white mb-4">
+									Thank you for your generous tip of ${lastPaymentAmount?.toFixed(2) || ''}!
+								</p>
+								<div className="flex gap-3 justify-center">
+									<motion.button
+										initial={{ opacity: 0, y: 20 }}
+										animate={{ opacity: 1, y: 0 }}
+										exit={{ opacity: 0, y: 20 }}
+										transition={{ delay: 0.5, type: "spring", stiffness: 300 }}
+										onClick={() => setShowSuccess(false)}
+										className="mt-6 px-6 py-3 bg-white text-emerald-600 rounded-lg font-semibold hover:bg-emerald-700 transition-colors"
+									>
+										Close
+									</motion.button>
+									<motion.button
+										initial={{ opacity: 0, y: 20 }}
+										animate={{ opacity: 1, y: 0 }}
+										exit={{ opacity: 0, y: 20 }}
+										transition={{ delay: 0.6, type: "spring", stiffness: 300 }}
+										onClick={() => setShowSuccess(false)}
+										className="mt-6 px-6 py-3 bg-emerald-800 text-white rounded-lg font-semibold hover:bg-emerald-900 transition-colors flex items-center gap-2"
+									>
+										<ExternalLink className="w-4 h-4" />
+										Back to Tipping
+									</motion.button>
+								</div>
+							</div>
+						</motion.div>
+					</motion.div>
+				)}
+			</AnimatePresence>
+
 			{/* Admin Banner - Only show to owners */}
 			{isOwner && (
 				<div className="bg-gray-900/80 backdrop-blur-sm">
@@ -160,7 +226,7 @@ export default function TipJarExperience({
 				</div>
 			)}
 
-			<div className="max-w-md mx-auto space-y-6 pt-8">
+					<div className="max-w-md mx-auto space-y-6 pt-8">
 				{/* Header */}
 				<motion.div
 					initial={{ opacity: 0, y: -20 }}

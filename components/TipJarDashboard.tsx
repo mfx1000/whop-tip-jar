@@ -24,7 +24,7 @@ interface TipTransaction {
 	id: string;
 	fromUsername: string;
 	amount: number;
-	creatorAmount: number;
+	companyAmount: number; // Fixed: was creatorAmount
 	status: string;
 	createdAt: string;
 }
@@ -393,11 +393,11 @@ export default function TipJarDashboard({
 						<Button
 							onClick={() => {
 								const csv = [
-									['Username', 'Amount', 'Creator Amount', 'Status', 'Date'],
+									['Username', 'Amount', 'You Receive', 'Status', 'Date'],
 									...transactions.map(t => [
 										t.fromUsername,
 										t.amount.toFixed(2),
-										t.creatorAmount.toFixed(2),
+										t.companyAmount.toFixed(2),
 										t.status,
 										new Date(t.createdAt).toLocaleString()
 									])
@@ -441,7 +441,7 @@ export default function TipJarDashboard({
 											<td className="py-3 px-4 text-sm text-[#ffffff]">{transaction.fromUsername}</td>
 											<td className="py-3 px-4 text-sm font-medium text-[#ffffff]">${transaction.amount.toFixed(2)}</td>
 											<td className="py-3 px-4 text-sm text-green-400 font-medium">
-												${transaction.creatorAmount.toFixed(2)}
+												${transaction.companyAmount.toFixed(2)}
 											</td>
 											<td className="py-3 px-4">
 												<span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
