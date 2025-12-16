@@ -12,17 +12,23 @@ export async function POST(request: NextRequest): Promise<Response> {
 		// Parse webhook data
 		let webhookData;
 		try {
-			// For now, always skip validation to test processing logic
-			// Production should use webhook validation, but we're testing the core functionality
-			console.log("⚠️ Testing mode: skipping webhook validation to test processing logic");
-			console.log("Webhook secret:", process.env.WHOP_WEBHOOK_SECRET?.substring(0, 20) + "...");
-			webhookData = JSON.parse(requestBodyText);
+			// PRODUCTION: Validate webhook signature from Whop
+			if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
+				console.log("🔒 Production mode: validating webhook signature");
+				webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
+			} else {
+				// Development/Testing: Skip validation for easier testing
+				console.log("⚠️ Development mode: skipping webhook validation for testing");
+				webhookData = JSON.parse(requestBodyText);
+			}
 		} catch (error) {
-			console.error("Failed to parse webhook:", error);
+			console.error("Failed to parse/validate webhook:", error);
 			console.error("Request body length:", requestBodyText.length);
 			console.error("Available headers:", Object.keys(headers));
+			console.error("Environment:", process.env.NODE_ENV);
+			console.error("Webhook secret set:", !!process.env.WHOP_WEBHOOK_SECRET);
 			// Return a more detailed error for debugging
-			return new Response(`Webhook parsing failed: ${(error as Error).message}`, { status: 400 });
+			return new Response(`Webhook validation failed: ${(error as Error).message}`, { status: 400 });
 		}
 
 		// Handle webhook events
@@ -31,9 +37,9 @@ export async function POST(request: NextRequest): Promise<Response> {
 		// Type assertion to handle webhook events properly
 		const webhookType = webhookData.type as string;
 		
-		if (webhookType === "payment.succeeded") {
-			waitUntil(handlePaymentSucceeded(webhookData.data as Payment));
-		} else if (webhookType === "payment.created") {
+	if (webhookType === "payment.succeeded") {
+		waitUntil(handlePaymentSucceeded(webhookData.data as Payment, request));
+	} else if (webhookType === "payment.created") {
 			console.log("[PAYMENT CREATED]", webhookData.data);
 		} else if (webhookType === "payment.failed") {
 			console.log("[PAYMENT FAILED]", webhookData.data);
@@ -52,7 +58,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 	}
 }
 
-async function handlePaymentSucceeded(payment: Payment) {
+async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 	console.log("[PAYMENT SUCCEEDED]", payment);
 	
 	try {
@@ -88,30 +94,36 @@ async function handlePaymentSucceeded(payment: Payment) {
 		// Developer user ID (replace with your actual developer user ID)
 		const developerUserId = process.env.DEVELOPER_USER_ID || 'user_DEVELOPER_ID_HERE';
 
-		// Record transaction first with accurate amounts
-		const transactionResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/tip-history`, {
+		// Use environment variable for base URL
+		const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://whop-tip-jar.vercel.app';
+			
+		// Build transaction data, filtering out undefined values
+		const transactionData: any = {
+			companyId,
+			fromUserId: userId,
+			fromUsername: username,
+			amount: grossAmount, // Original tip amount
+			netAmount: amountAfterFees, // Amount after fees
+			paymentId,
+			status: 'completed',
+			// Accurate payout amounts
+			companyAmount,
+			developerAmount,
+			feeAmount,
+		};
+
+		// Only add metadata fields if they exist (avoid undefined values)
+		if (metadata.experienceId) transactionData.experienceId = metadata.experienceId;
+		if (metadata.tipperId) transactionData.tipperId = metadata.tipperId;
+		if (metadata.experienceName) transactionData.experienceName = metadata.experienceName;
+		if (metadata.tipperName) transactionData.tipperName = metadata.tipperName;
+
+		const transactionResponse = await fetch(`${baseUrl}/api/tip-history`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
 			},
-			body: JSON.stringify({
-				companyId,
-				fromUserId: userId,
-				fromUsername: username,
-				amount: grossAmount, // Original tip amount
-				netAmount: amountAfterFees, // Amount after fees
-				paymentId,
-				status: 'completed',
-				// Accurate payout amounts
-				companyAmount,
-				developerAmount,
-				feeAmount,
-				// Metadata from checkout
-				experienceId: metadata.experienceId,
-				tipperId: metadata.tipperId,
-				experienceName: metadata.experienceName,
-				tipperName: metadata.tipperName,
-			}),
+			body: JSON.stringify(transactionData),
 		});
 
 		if (!transactionResponse.ok) {
@@ -154,7 +166,7 @@ async function handlePaymentSucceeded(payment: Payment) {
 		}
 
 		// Update analytics with accurate data
-		const analyticsResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/tip-analytics`, {
+		const analyticsResponse = await fetch(`${baseUrl}/api/tip-analytics`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
