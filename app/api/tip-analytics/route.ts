@@ -57,9 +57,9 @@ export async function POST(request: NextRequest) {
     const { 
       companyId, 
       tipAmount, 
-      creatorAmount, 
+      companyAmount, 
       developerAmount,
-      whopFee 
+      feeAmount 
     } = body;
 
     if (!companyId || tipAmount === undefined) {
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
       newAnalytics = {
         companyId,
         totalTips: tipAmount,
-        totalCreatorEarnings: creatorAmount || tipAmount * 0.8,
+        totalCreatorEarnings: companyAmount || tipAmount * 0.8,
         totalDeveloperEarnings: developerAmount || tipAmount * 0.2,
         tipCount: 1,
         averageTipAmount: tipAmount,
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
       
       newAnalytics = {
         totalTips: existingData.totalTips + tipAmount,
-        totalCreatorEarnings: existingData.totalCreatorEarnings + (creatorAmount || tipAmount * 0.8),
+        totalCreatorEarnings: existingData.totalCreatorEarnings + (companyAmount || tipAmount * 0.8),
         totalDeveloperEarnings: existingData.totalDeveloperEarnings + (developerAmount || tipAmount * 0.2),
         tipCount: existingData.tipCount + 1,
         averageTipAmount: (existingData.totalTips + tipAmount) / (existingData.tipCount + 1),

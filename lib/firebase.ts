@@ -68,13 +68,18 @@ export interface TipTransaction {
   experienceId: string;
   fromUserId: string;
   fromUsername: string;
-  amount: number;
-  creatorAmount: number;
-  developerAmount: number;
-  whopFee: number;
+  amount: number; // Original tip amount (gross)
+  netAmount: number; // Amount after Whop fees
+  companyAmount: number; // 80% of netAmount
+  developerAmount: number; // 20% of netAmount
+  feeAmount: number; // Whop processing fees
   status: 'pending' | 'completed' | 'failed';
   paymentId: string;
   productId: string;
+  // Additional metadata from checkout
+  tipperId?: string;
+  tipperName?: string;
+  experienceName?: string;
   createdAt: Date;
 }
 

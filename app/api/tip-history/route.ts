@@ -71,11 +71,15 @@ export async function POST(request: NextRequest) {
       fromUserId,
       fromUsername,
       amount,
-      creatorAmount,
+      netAmount,
+      companyAmount,
       developerAmount,
-      whopFee,
+      feeAmount,
       paymentId,
       productId,
+      tipperId,
+      tipperName,
+      experienceName,
       status = 'completed'
     } = body;
 
@@ -106,12 +110,16 @@ export async function POST(request: NextRequest) {
       fromUserId,
       fromUsername: fromUsername || 'Anonymous',
       amount,
-      creatorAmount: creatorAmount || amount * 0.8,
+      netAmount: netAmount || amount,
+      companyAmount: companyAmount || amount * 0.8,
       developerAmount: developerAmount || amount * 0.2,
-      whopFee: whopFee || amount * 0.029 + 0.30, // Standard Stripe-like fee estimate
+      feeAmount: feeAmount || 0,
       status: status as 'pending' | 'completed' | 'failed',
       paymentId,
       productId: productId || '',
+      tipperId,
+      tipperName,
+      experienceName,
       createdAt: new Date(),
     };
 

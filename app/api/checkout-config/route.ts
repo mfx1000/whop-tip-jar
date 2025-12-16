@@ -16,9 +16,9 @@ export async function POST(request: NextRequest) {
 
     // Create a checkout configuration with the tip amount
     const checkoutConfig = await whopsdk.checkoutConfigurations.create({
-      company_id: companyId,
       plan: {
-        initial_price: amount * 100, // Whop uses cents
+        company_id: companyId, // Only add company_id to plan
+        initial_price: amount, // Use dollars directly for checkout config
         plan_type: 'one_time',
         currency: 'usd',
       },

@@ -48,20 +48,39 @@ async function handlePaymentSucceeded(payment: Payment) {
 	console.log("[PAYMENT SUCCEEDED]", payment);
 	
 	try {
-		// Extract payment details
+		// Extract accurate payment details from webhook
 		const paymentId = payment.id;
-		const amount = payment.amount_after_fees ? payment.amount_after_fees / 100 : 0; // Convert from cents to dollars
-		const companyId = payment.company?.id;
-		const userId = payment.user?.id;
-		const username = payment.user?.username || 'Anonymous';
-		const productId = payment.product?.id;
+		// Use any type to access properties not in the Payment type definition
+		const paymentData = payment as any;
+		const grossAmount = paymentData.amount ? paymentData.amount / 100 : 0; // Convert from cents to dollars
+		const amountAfterFees = paymentData.amount_after_fees ? paymentData.amount_after_fees / 100 : grossAmount; // Convert from cents to dollars
+		const feeAmount = paymentData.fee_amount ? paymentData.fee_amount / 100 : (grossAmount - amountAfterFees); // Convert from cents to dollars
+		const companyId = paymentData.company?.id;
+		const userId = paymentData.user?.id;
+		const username = paymentData.user?.username || 'Anonymous';
+		const metadata = paymentData.checkout?.metadata || {};
 		
-		if (!companyId || !userId || !amount) {
-			console.error('Missing required payment data:', { paymentId, companyId, userId, amount });
+		if (!companyId || !userId || !amountAfterFees) {
+			console.error('Missing required payment data:', { paymentId, companyId, userId, amountAfterFees });
 			return;
 		}
 
-		// Record the transaction in our database
+		// Calculate accurate payout splits (80% to company, 20% to developer)
+		const companyAmount = amountAfterFees * 0.8;
+		const developerAmount = amountAfterFees * 0.2;
+
+		console.log('Payment breakdown:', {
+			grossAmount,
+			feeAmount,
+			amountAfterFees,
+			companyAmount,
+			developerAmount
+		});
+
+		// Developer user ID (replace with your actual developer user ID)
+		const developerUserId = process.env.DEVELOPER_USER_ID || 'user_DEVELOPER_ID_HERE';
+
+		// Record transaction first with accurate amounts
 		const transactionResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/tip-history`, {
 			method: 'POST',
 			headers: {
@@ -71,14 +90,19 @@ async function handlePaymentSucceeded(payment: Payment) {
 				companyId,
 				fromUserId: userId,
 				fromUsername: username,
-				amount,
+				amount: grossAmount, // Original tip amount
+				netAmount: amountAfterFees, // Amount after fees
 				paymentId,
-				productId,
 				status: 'completed',
-				// Whop handles the split automatically, so we calculate estimates
-				creatorAmount: amount * 0.8,
-				developerAmount: amount * 0.2,
-				whopFee: amount * 0.029 + 0.30, // Estimated fee
+				// Accurate payout amounts
+				companyAmount,
+				developerAmount,
+				feeAmount,
+				// Metadata from checkout
+				experienceId: metadata.experienceId,
+				tipperId: metadata.tipperId,
+				experienceName: metadata.experienceName,
+				tipperName: metadata.tipperName,
 			}),
 		});
 
@@ -88,7 +112,40 @@ async function handlePaymentSucceeded(payment: Payment) {
 			return;
 		}
 
-		// Update analytics
+		// Execute payout transfers using Whop API
+		try {
+			// Transfer 80% to the company
+			if (companyAmount >= 0.01) { // Only transfer if amount is meaningful
+				const companyTransfer = await whopsdk.transfers.create({
+					amount: companyAmount,
+					currency: 'usd',
+					destination_id: companyId, // Transfer to company
+					origin_id: companyId, // From company's balance
+					notes: `Tip payment share (80%) from ${username} for payment ${paymentId}`,
+					idempotence_key: `tip_company_${paymentId}`,
+				});
+				console.log('Company transfer created:', companyTransfer.id);
+			}
+
+			// Transfer 20% to developer
+			if (developerAmount >= 0.01) { // Only transfer if amount is meaningful
+				const developerTransfer = await whopsdk.transfers.create({
+					amount: developerAmount,
+					currency: 'usd',
+					destination_id: developerUserId, // Transfer to developer user
+					origin_id: companyId, // From company's balance
+					notes: `Developer share TipJar (20%) from tip payment ${paymentId}`,
+					idempotence_key: `tip_developer_${paymentId}`,
+				});
+				console.log('Developer transfer created:', developerTransfer.id);
+			}
+
+		} catch (transferError) {
+			console.error('Error creating transfers:', transferError);
+			// Don't fail the webhook, but log the error for manual intervention
+		}
+
+		// Update analytics with accurate data
 		const analyticsResponse = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/tip-analytics`, {
 			method: 'POST',
 			headers: {
@@ -96,10 +153,11 @@ async function handlePaymentSucceeded(payment: Payment) {
 			},
 			body: JSON.stringify({
 				companyId,
-				tipAmount: amount,
-				creatorAmount: amount * 0.8,
-				developerAmount: amount * 0.2,
-				whopFee: amount * 0.029 + 0.30,
+				tipAmount: grossAmount,
+				netAmount: amountAfterFees,
+				companyAmount,
+				developerAmount,
+				feeAmount,
 			}),
 		});
 
@@ -108,7 +166,14 @@ async function handlePaymentSucceeded(payment: Payment) {
 			console.error('Failed to update analytics:', errorData);
 		}
 
-		console.log('Successfully processed tip payment:', { paymentId, amount, companyId });
+		console.log('Successfully processed tip payment with accurate payouts:', { 
+			paymentId, 
+			grossAmount, 
+			amountAfterFees, 
+			companyAmount, 
+			developerAmount,
+			companyId 
+		});
 
 	} catch (error) {
 		console.error('Error handling payment succeeded webhook:', error);

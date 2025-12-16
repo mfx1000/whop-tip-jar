@@ -288,6 +288,12 @@ export default function TipJarDashboard({
 						</Button>
 					</div>
 
+					{/* Platform Fee Info */}
+					<div className="mb-4 text-xs text-[#666666] flex items-center gap-1">
+						<span>ℹ</span>
+						<span>Platform fee (20% on each transaction)</span>
+					</div>
+
 					{editMode ? (
 						<div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 							{/* Tip Amounts Section */}
