@@ -34,6 +34,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 			}
 		} catch (error) {
 			console.error("Failed to parse/validate webhook:", error);
+			console.error("Request body:", requestBodyText);
 			console.error("Request body length:", requestBodyText.length);
 			console.error("Available headers:", Object.keys(headers));
 			console.error("Environment:", process.env.NODE_ENV);
