@@ -185,10 +185,28 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 		if (metadata.experienceName) transactionData.experienceName = metadata.experienceName;
 		if (metadata.tipperName) transactionData.tipperName = metadata.tipperName;
 
+		// Create Firebase custom token for webhook authentication
+		let authToken = null;
+		try {
+			const admin = require('firebase-admin');
+			const uid = `webhook-service-${companyId}`;
+			authToken = await admin.auth().createCustomToken(uid, {
+				email: `webhook@${companyId}.service`,
+				email_verified: true,
+				firebase: {
+					sign_in_provider: 'anonymous'
+				}
+			});
+		} catch (authError) {
+			console.error('Failed to create auth token:', authError);
+			// Continue without auth token - Firebase rules should allow this
+		}
+
 		const transactionResponse = await fetch(`${baseUrl}/api/tip-history`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
+				...(authToken && { 'Authorization': `Bearer ${authToken}` })
 			},
 			body: JSON.stringify(transactionData),
 		});

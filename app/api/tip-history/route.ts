@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { collections, TipTransaction } from '@/lib/firebase';
+import { getAuth } from 'firebase-admin/auth';
 
 // GET - Retrieve transaction history for a company
 export async function GET(request: NextRequest) {
@@ -64,6 +65,21 @@ export async function GET(request: NextRequest) {
 // POST - Create a new transaction record (typically called from webhooks)
 export async function POST(request: NextRequest) {
   try {
+    // Handle Firebase authentication for webhooks
+    let auth = null;
+    const authHeader = request.headers.get('Authorization');
+    
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const token = authHeader.substring(7);
+        auth = await getAuth().verifyIdToken(token);
+        console.log('Authenticated webhook user:', auth.uid);
+      } catch (authError) {
+        console.error('Auth verification failed:', authError);
+        // Continue without auth for now
+      }
+    }
+
     const body = await request.json();
     const { 
       companyId,
