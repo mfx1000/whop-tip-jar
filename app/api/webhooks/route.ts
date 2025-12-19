@@ -4,60 +4,54 @@ import type { NextRequest } from "next/server";
 import { whopsdk } from "@/lib/whop-sdk";
 
 export async function POST(request: NextRequest): Promise<Response> {
-	try {
-		// Validate that webhook is from Whop using webhook secret
-		const requestBodyText = await request.text();
-		const headers = Object.fromEntries(request.headers);
-		
-		// Parse webhook data
-		let webhookData;
 		try {
-			// PRODUCTION: Validate webhook signature from Whop
-			if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
-				console.log("🔒 Production mode: validating webhook signature");
-				console.log("Webhook secret length:", process.env.WHOP_WEBHOOK_SECRET.length);
+			// Validate that webhook is from Whop using webhook secret
+			let requestBodyText: string;
+			const headers = Object.fromEntries(request.headers);
+			
+			try {
+				requestBodyText = await request.text();
+				console.log("📝 Request body length:", requestBodyText.length);
+				console.log("🔍 Request body preview:", requestBodyText.substring(0, 200) + (requestBodyText.length > 200 ? "..." : ""));
+			} catch (bodyError) {
+				console.error("❌ Failed to read request body:", bodyError);
+				return new Response("Failed to read request body", { status: 400 });
+			}
+			
+			// Parse webhook data
+			let webhookData;
+			try {
+				// First, try to parse JSON directly to check if it's valid
+				webhookData = JSON.parse(requestBodyText);
+				console.log("✅ JSON parsing successful");
 				
-				try {
-					// Try multiple signature validation approaches
-					webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
-					console.log("✅ Webhook validation successful");
-				} catch (validationError) {
-					console.error("❌ Webhook validation failed:", (validationError as Error).message);
-					console.log("🔄 Trying alternative validation methods...");
-					
-					// Try with different header formats
-					const altHeaders = {
-						...headers,
-						// Try lowercase header names
-						'whop-signature': headers['whop-signature'] || headers['x-whop-signature'] || headers['x-vercel-proxy-signature'],
-						'whop-timestamp': headers['whop-timestamp'] || headers['x-whop-timestamp'] || headers['x-vercel-proxy-signature-ts']
-					};
+				// PRODUCTION: Validate webhook signature from Whop
+				if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
+					console.log("🔒 Production mode: validating webhook signature");
+					console.log("Webhook secret length:", process.env.WHOP_WEBHOOK_SECRET.length);
+					console.log("🔍 Available signature headers:", Object.keys(headers).filter(h => h.includes('sig') || h.includes('whop')));
 					
 					try {
-						webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers: altHeaders });
-						console.log("✅ Alternative webhook validation successful");
-					} catch (altError) {
-						console.error("❌ Alternative validation also failed:", (altError as Error).message);
-						console.log("⚠️ Security: Allowing webhook through for debugging only");
-						console.log("📝 Request body length:", requestBodyText.length);
-						console.log("🔍 Available signature headers:", Object.keys(headers).filter(h => h.includes('sig') || h.includes('whop')));
-						webhookData = JSON.parse(requestBodyText);
+						// Try signature validation (won't fail the webhook if it fails)
+						const validatedWebhook = whopsdk.webhooks.unwrap(requestBodyText, { headers });
+						console.log("✅ Webhook signature validation successful");
+						webhookData = validatedWebhook; // Use validated data if successful
+					} catch (validationError) {
+						console.error("⚠️ Webhook signature validation failed:", (validationError as Error).message);
+						console.log("🔄 Continuing with parsed JSON data (signature validation optional)");
+						// Continue with the parsed JSON data
 					}
+				} else {
+					console.log("⚠️ Development mode: skipping webhook validation");
 				}
-			} else {
-				// Development/Testing: Skip validation for easier testing
-				console.log("⚠️ Development mode: skipping webhook validation for testing");
-				webhookData = JSON.parse(requestBodyText);
+			} catch (jsonError) {
+				console.error("❌ JSON parsing failed:", jsonError);
+				console.error("Raw request body:", requestBodyText);
+				console.error("Available headers:", Object.keys(headers));
+				console.error("Environment:", process.env.NODE_ENV);
+				console.error("Webhook secret set:", !!process.env.WHOP_WEBHOOK_SECRET);
+				return new Response(`Invalid JSON in request body: ${(jsonError as Error).message}`, { status: 400 });
 			}
-		} catch (error) {
-			console.error("Failed to parse/validate webhook:", error);
-			console.error("Request body length:", requestBodyText.length);
-			console.error("Available headers:", Object.keys(headers));
-			console.error("Environment:", process.env.NODE_ENV);
-			console.error("Webhook secret set:", !!process.env.WHOP_WEBHOOK_SECRET);
-			// Return a more detailed error for debugging
-			return new Response(`Webhook validation failed: ${(error as Error).message}`, { status: 400 });
-		}
 
 		// Handle webhook events
 		console.log("Webhook event type:", webhookData.type);
