@@ -16,16 +16,33 @@ export async function POST(request: NextRequest): Promise<Response> {
 			if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
 				console.log("🔒 Production mode: validating webhook signature");
 				console.log("Webhook secret length:", process.env.WHOP_WEBHOOK_SECRET.length);
-				console.log("Request headers:", headers);
-				console.log("Request body preview:", requestBodyText.substring(0, 200) + "...");
 				
 				try {
+					// Try multiple signature validation approaches
 					webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
 					console.log("✅ Webhook validation successful");
 				} catch (validationError) {
-					console.error("❌ Webhook validation failed, falling back to direct parse:", validationError);
-					console.log("⚠️ Allowing webhook through for now (temporary fix)");
-					webhookData = JSON.parse(requestBodyText);
+					console.error("❌ Webhook validation failed:", (validationError as Error).message);
+					console.log("🔄 Trying alternative validation methods...");
+					
+					// Try with different header formats
+					const altHeaders = {
+						...headers,
+						// Try lowercase header names
+						'whop-signature': headers['whop-signature'] || headers['x-whop-signature'] || headers['x-vercel-proxy-signature'],
+						'whop-timestamp': headers['whop-timestamp'] || headers['x-whop-timestamp'] || headers['x-vercel-proxy-signature-ts']
+					};
+					
+					try {
+						webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers: altHeaders });
+						console.log("✅ Alternative webhook validation successful");
+					} catch (altError) {
+						console.error("❌ Alternative validation also failed:", (altError as Error).message);
+						console.log("⚠️ Security: Allowing webhook through for debugging only");
+						console.log("📝 Request body length:", requestBodyText.length);
+						console.log("🔍 Available signature headers:", Object.keys(headers).filter(h => h.includes('sig') || h.includes('whop')));
+						webhookData = JSON.parse(requestBodyText);
+					}
 				}
 			} else {
 				// Development/Testing: Skip validation for easier testing
@@ -211,33 +228,69 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 				const isDeveloperUser = developerUserId.startsWith('user_');
 				const isDeveloperCompany = developerUserId.startsWith('biz_');
 				
+				console.log('🔍 Attempting to get ledger accounts for transfer...');
+				console.log('📋 Developer ID:', developerUserId);
+				console.log('📋 Company ID:', companyId);
+				
+				// Get ledger accounts for both company and developer
+				let originLedgerId = companyId;
+				let destinationLedgerId = developerUserId;
+				
+				try {
+					// Get company ledger account
+					const companyLedger = await whopsdk.ledgerAccounts.retrieve(companyId);
+					console.log('✅ Company ledger account:', companyLedger.id);
+					originLedgerId = companyLedger.id;
+					
+					// Get developer ledger account
+					if (isDeveloperUser) {
+						const developerLedger = await whopsdk.ledgerAccounts.retrieve(developerUserId);
+						console.log('✅ Developer ledger account:', developerLedger.id);
+						destinationLedgerId = developerLedger.id;
+					} else if (isDeveloperCompany) {
+						const developerCompanyLedger = await whopsdk.ledgerAccounts.retrieve(developerUserId);
+						console.log('✅ Developer company ledger account:', developerCompanyLedger.id);
+						destinationLedgerId = developerCompanyLedger.id;
+					}
+					
+				} catch (ledgerError) {
+					console.error('⚠️ Could not retrieve ledger accounts, falling back to direct IDs:', ledgerError);
+					// Fall back to original IDs if ledger lookup fails
+				}
+				
 				let transferParams: any = {
 					amount: finalDeveloperAmount,
 					currency: 'usd',
-					origin_id: companyId, // From company's balance
+					origin_id: originLedgerId, // Use ledger account ID
+					destination_id: destinationLedgerId, // Use ledger account ID
 					notes: `Developer share TipJar (20%) from tip payment ${paymentId}`,
 					idempotence_key: `tip_developer_${paymentId}`,
 				};
 
-				// Set destination based on developer ID type
-				if (isDeveloperUser) {
-					transferParams.destination_id = developerUserId; // Transfer to user
-				} else if (isDeveloperCompany) {
-					transferParams.destination_id = developerUserId; // Transfer to company
-				} else {
-					console.error('Invalid developer ID format:', developerUserId);
-					throw new Error('Developer ID must start with user_ or biz_');
-				}
+				console.log('📤 Transfer params:', {
+					amount: transferParams.amount,
+					currency: transferParams.currency,
+					origin_id: transferParams.origin_id,
+					destination_id: transferParams.destination_id,
+					notes: transferParams.notes
+				});
 
 				const developerTransfer = await whopsdk.transfers.create(transferParams);
-				console.log('Developer transfer created:', developerTransfer.id);
+				console.log('✅ Developer transfer created:', developerTransfer.id);
 			} else {
 				console.log('Developer transfer skipped - either amount too small or developer is same as company');
 			}
 
 		} catch (transferError) {
-			console.error('Error creating transfers:', transferError);
-			// Don't fail webhook, but log the error for manual intervention
+			console.error('❌ Error creating transfers:', transferError);
+			console.error('🔧 Transfer error details:', {
+				message: (transferError as Error).message,
+				stack: (transferError as Error).stack,
+				developerUserId,
+				companyId,
+				finalDeveloperAmount
+			});
+			// Don't fail webhook, but log error for manual intervention
 		}
 
 		// Update analytics with accurate data
