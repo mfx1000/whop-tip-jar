@@ -34,7 +34,6 @@ export async function POST(request: NextRequest): Promise<Response> {
 			}
 		} catch (error) {
 			console.error("Failed to parse/validate webhook:", error);
-			console.error("Request body:", requestBodyText);
 			console.error("Request body length:", requestBodyText.length);
 			console.error("Available headers:", Object.keys(headers));
 			console.error("Environment:", process.env.NODE_ENV);
@@ -186,28 +185,10 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 		if (metadata.experienceName) transactionData.experienceName = metadata.experienceName;
 		if (metadata.tipperName) transactionData.tipperName = metadata.tipperName;
 
-		// Create Firebase custom token for webhook authentication
-		let authToken = null;
-		try {
-			const admin = require('firebase-admin');
-			const uid = `webhook-service-${companyId}`;
-			authToken = await admin.auth().createCustomToken(uid, {
-				email: `webhook@${companyId}.service`,
-				email_verified: true,
-				firebase: {
-					sign_in_provider: 'anonymous'
-				}
-			});
-		} catch (authError) {
-			console.error('Failed to create auth token:', authError);
-			// Continue without auth token - Firebase rules should allow this
-		}
-
 		const transactionResponse = await fetch(`${baseUrl}/api/tip-history`, {
 			method: 'POST',
 			headers: {
 				'Content-Type': 'application/json',
-				...(authToken && { 'Authorization': `Bearer ${authToken}` })
 			},
 			body: JSON.stringify(transactionData),
 		});
@@ -220,30 +201,38 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 
 		// Execute payout transfers using Whop API
 		try {
-			// Transfer 80% to company
-			if (finalCompanyAmount >= 0.01) { // Only transfer if amount is meaningful
-				const companyTransfer = await whopsdk.transfers.create({
-					amount: finalCompanyAmount,
-					currency: 'usd',
-					destination_id: companyId, // Transfer to company
-					origin_id: companyId, // From company's balance
-					notes: `Tip payment share (80%) from ${username} for payment ${paymentId}`,
-					idempotence_key: `tip_company_${paymentId}`,
-				});
-				console.log('Company transfer created:', companyTransfer.id);
-			}
+			// Transfer 80% to company (this is actually keeping it in the company account, so no transfer needed)
+			// The company already has the funds after payment, we just need to transfer the developer's share
+			console.log('Company keeps 80% ($' + finalCompanyAmount.toFixed(2) + ') - no transfer needed');
 
-			// Transfer 20% to developer
-			if (finalDeveloperAmount >= 0.01) { // Only transfer if amount is meaningful
-				const developerTransfer = await whopsdk.transfers.create({
+			// Transfer 20% to developer only if developer is a different user
+			if (finalDeveloperAmount >= 0.01 && developerUserId !== companyId) { 
+				// Check if developerUserId is a user or company
+				const isDeveloperUser = developerUserId.startsWith('user_');
+				const isDeveloperCompany = developerUserId.startsWith('biz_');
+				
+				let transferParams: any = {
 					amount: finalDeveloperAmount,
 					currency: 'usd',
-					destination_id: developerUserId, // Transfer to developer user
 					origin_id: companyId, // From company's balance
 					notes: `Developer share TipJar (20%) from tip payment ${paymentId}`,
 					idempotence_key: `tip_developer_${paymentId}`,
-				});
+				};
+
+				// Set destination based on developer ID type
+				if (isDeveloperUser) {
+					transferParams.destination_id = developerUserId; // Transfer to user
+				} else if (isDeveloperCompany) {
+					transferParams.destination_id = developerUserId; // Transfer to company
+				} else {
+					console.error('Invalid developer ID format:', developerUserId);
+					throw new Error('Developer ID must start with user_ or biz_');
+				}
+
+				const developerTransfer = await whopsdk.transfers.create(transferParams);
 				console.log('Developer transfer created:', developerTransfer.id);
+			} else {
+				console.log('Developer transfer skipped - either amount too small or developer is same as company');
 			}
 
 		} catch (transferError) {

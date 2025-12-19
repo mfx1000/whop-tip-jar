@@ -35,6 +35,11 @@ if (!admin.apps.length) {
       projectId, // Explicitly set project ID
     });
     
+    // Configure Firestore to ignore undefined values
+    admin.firestore().settings({
+      ignoreUndefinedProperties: true
+    });
+    
     console.log('Firebase Admin initialized successfully for project:', projectId);
   } catch (error) {
     console.error('Firebase admin initialization error:', error);
