@@ -4,54 +4,44 @@ import type { NextRequest } from "next/server";
 import { whopsdk } from "@/lib/whop-sdk";
 
 export async function POST(request: NextRequest): Promise<Response> {
+	try {
+		// Validate that webhook is from Whop using webhook secret
+		const requestBodyText = await request.text();
+		const headers = Object.fromEntries(request.headers);
+		
+		// Parse webhook data
+		let webhookData;
 		try {
-			// Validate that webhook is from Whop using webhook secret
-			let requestBodyText: string;
-			const headers = Object.fromEntries(request.headers);
-			
-			try {
-				requestBodyText = await request.text();
-				console.log("📝 Request body length:", requestBodyText.length);
-				console.log("🔍 Request body preview:", requestBodyText.substring(0, 200) + (requestBodyText.length > 200 ? "..." : ""));
-			} catch (bodyError) {
-				console.error("❌ Failed to read request body:", bodyError);
-				return new Response("Failed to read request body", { status: 400 });
-			}
-			
-			// Parse webhook data
-			let webhookData;
-			try {
-				// First, try to parse JSON directly to check if it's valid
-				webhookData = JSON.parse(requestBodyText);
-				console.log("✅ JSON parsing successful");
+			// PRODUCTION: Validate webhook signature from Whop
+			// if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
+			if (process.env.WHOP_WEBHOOK_SECRET) {
+				console.log("🔒 Production mode: validating webhook signature");
+				console.log("Webhook secret length:", process.env.WHOP_WEBHOOK_SECRET.length);
+				console.log("Request headers:", headers);
+				console.log("Request body preview:", requestBodyText.substring(0, 200) + "...");
 				
-				// PRODUCTION: Validate webhook signature from Whop
-				if (process.env.NODE_ENV === 'production' && process.env.WHOP_WEBHOOK_SECRET) {
-					console.log("🔒 Production mode: validating webhook signature");
-					console.log("Webhook secret length:", process.env.WHOP_WEBHOOK_SECRET.length);
-					console.log("🔍 Available signature headers:", Object.keys(headers).filter(h => h.includes('sig') || h.includes('whop')));
-					
-					try {
-						// Try signature validation (won't fail the webhook if it fails)
-						const validatedWebhook = whopsdk.webhooks.unwrap(requestBodyText, { headers });
-						console.log("✅ Webhook signature validation successful");
-						webhookData = validatedWebhook; // Use validated data if successful
-					} catch (validationError) {
-						console.error("⚠️ Webhook signature validation failed:", (validationError as Error).message);
-						console.log("🔄 Continuing with parsed JSON data (signature validation optional)");
-						// Continue with the parsed JSON data
-					}
-				} else {
-					console.log("⚠️ Development mode: skipping webhook validation");
+				try {
+					webhookData = whopsdk.webhooks.unwrap(requestBodyText, { headers });
+					console.log("✅ Webhook validation successful");
+				} catch (validationError) {
+					console.error("❌ Webhook validation failed, falling back to direct parse:", validationError);
+					console.log("⚠️ Allowing webhook through for now (temporary fix)");
+					webhookData = JSON.parse(requestBodyText);
 				}
-			} catch (jsonError) {
-				console.error("❌ JSON parsing failed:", jsonError);
-				console.error("Raw request body:", requestBodyText);
-				console.error("Available headers:", Object.keys(headers));
-				console.error("Environment:", process.env.NODE_ENV);
-				console.error("Webhook secret set:", !!process.env.WHOP_WEBHOOK_SECRET);
-				return new Response(`Invalid JSON in request body: ${(jsonError as Error).message}`, { status: 400 });
+			} else {
+				// Development/Testing: Skip validation for easier testing
+				console.log("⚠️ Development mode: skipping webhook validation for testing");
+				webhookData = JSON.parse(requestBodyText);
 			}
+		} catch (error) {
+			console.error("Failed to parse/validate webhook:", error);
+			console.error("Request body length:", requestBodyText.length);
+			console.error("Available headers:", Object.keys(headers));
+			console.error("Environment:", process.env.NODE_ENV);
+			console.error("Webhook secret set:", !!process.env.WHOP_WEBHOOK_SECRET);
+			// Return a more detailed error for debugging
+			return new Response(`Webhook validation failed: ${(error as Error).message}`, { status: 400 });
+		}
 
 		// Handle webhook events
 		console.log("Webhook event type:", webhookData.type);
@@ -150,7 +140,8 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 		});
 
 		// Developer user ID (replace with your actual developer user ID)
-		const developerUserId = process.env.DEVELOPER_USER_ID || 'user_DEVELOPER_ID_HERE';
+		// const developerUserId = process.env.DEVELOPER_USER_ID || 'user_DEVELOPER_ID_HERE';
+		const developerUserId = 'biz_LHzh1wochD3LE4';
 
 		// Use environment variable for base URL
 		const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://whop-tip-jar.vercel.app';
@@ -222,69 +213,33 @@ async function handlePaymentSucceeded(payment: Payment, request: NextRequest) {
 				const isDeveloperUser = developerUserId.startsWith('user_');
 				const isDeveloperCompany = developerUserId.startsWith('biz_');
 				
-				console.log('🔍 Attempting to get ledger accounts for transfer...');
-				console.log('📋 Developer ID:', developerUserId);
-				console.log('📋 Company ID:', companyId);
-				
-				// Get ledger accounts for both company and developer
-				let originLedgerId = companyId;
-				let destinationLedgerId = developerUserId;
-				
-				try {
-					// Get company ledger account
-					const companyLedger = await whopsdk.ledgerAccounts.retrieve(companyId);
-					console.log('✅ Company ledger account:', companyLedger.id);
-					originLedgerId = companyLedger.id;
-					
-					// Get developer ledger account
-					if (isDeveloperUser) {
-						const developerLedger = await whopsdk.ledgerAccounts.retrieve(developerUserId);
-						console.log('✅ Developer ledger account:', developerLedger.id);
-						destinationLedgerId = developerLedger.id;
-					} else if (isDeveloperCompany) {
-						const developerCompanyLedger = await whopsdk.ledgerAccounts.retrieve(developerUserId);
-						console.log('✅ Developer company ledger account:', developerCompanyLedger.id);
-						destinationLedgerId = developerCompanyLedger.id;
-					}
-					
-				} catch (ledgerError) {
-					console.error('⚠️ Could not retrieve ledger accounts, falling back to direct IDs:', ledgerError);
-					// Fall back to original IDs if ledger lookup fails
-				}
-				
 				let transferParams: any = {
 					amount: finalDeveloperAmount,
 					currency: 'usd',
-					origin_id: originLedgerId, // Use ledger account ID
-					destination_id: destinationLedgerId, // Use ledger account ID
+					origin_id: companyId, // From company's balance
 					notes: `Developer share TipJar (20%) from tip payment ${paymentId}`,
 					idempotence_key: `tip_developer_${paymentId}`,
 				};
 
-				console.log('📤 Transfer params:', {
-					amount: transferParams.amount,
-					currency: transferParams.currency,
-					origin_id: transferParams.origin_id,
-					destination_id: transferParams.destination_id,
-					notes: transferParams.notes
-				});
+				// Set destination based on developer ID type
+				if (isDeveloperUser) {
+					transferParams.destination_id = developerUserId; // Transfer to user
+				} else if (isDeveloperCompany) {
+					transferParams.destination_id = developerUserId; // Transfer to company
+				} else {
+					console.error('Invalid developer ID format:', developerUserId);
+					throw new Error('Developer ID must start with user_ or biz_');
+				}
 
 				const developerTransfer = await whopsdk.transfers.create(transferParams);
-				console.log('✅ Developer transfer created:', developerTransfer.id);
+				console.log('Developer transfer created:', developerTransfer.id);
 			} else {
 				console.log('Developer transfer skipped - either amount too small or developer is same as company');
 			}
 
 		} catch (transferError) {
-			console.error('❌ Error creating transfers:', transferError);
-			console.error('🔧 Transfer error details:', {
-				message: (transferError as Error).message,
-				stack: (transferError as Error).stack,
-				developerUserId,
-				companyId,
-				finalDeveloperAmount
-			});
-			// Don't fail webhook, but log error for manual intervention
+			console.error('Error creating transfers:', transferError);
+			// Don't fail webhook, but log the error for manual intervention
 		}
 
 		// Update analytics with accurate data
